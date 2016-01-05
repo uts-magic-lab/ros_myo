@@ -32,7 +32,7 @@ if __name__ == '__main__':
 
     global armState
     global xDirState
-    armState = 0;
+    armState = 1;
     rospy.init_node('turtlesim_driver', anonymous=True)
 
     turtlesimPub = rospy.Publisher("directs", String, queue_size=10)

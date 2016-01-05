@@ -297,7 +297,7 @@ class MyoRaw(object):
                 gyro = vals[7:10]
                 self.on_imu(quat, acc, gyro)
             elif attr == 0x23:
-                typ, val, xdir = unpack('3B', pay)
+                typ, val, xdir, _,_,_ = unpack('6B', pay)
 
                 if typ == 1: # on arm
                     self.on_arm(Arm(val), XDirection(xdir))
@@ -330,7 +330,45 @@ class MyoRaw(object):
         '''
 
         self.write_attr(0x28, b'\x01\x00')
+        #self.write_attr(0x19, b'\x01\x03\x01\x01\x00')
+        self.write_attr(0x19, b'\x01\x03\x01\x01\x01')
+
+    def mc_start_collection(self):
+        '''Myo Connect sends this sequence (or a reordering) when starting data
+        collection for v1.0 firmware; this enables raw data but disables arm and
+        pose notifications.
+        '''
+
+        self.write_attr(0x28, b'\x01\x00')
+        self.write_attr(0x1d, b'\x01\x00')
+        self.write_attr(0x24, b'\x02\x00')
+        self.write_attr(0x19, b'\x01\x03\x01\x01\x01')
+        self.write_attr(0x28, b'\x01\x00')
+        self.write_attr(0x1d, b'\x01\x00')
+        self.write_attr(0x19, b'\x09\x01\x01\x00\x00')
+        self.write_attr(0x1d, b'\x01\x00')
+        self.write_attr(0x19, b'\x01\x03\x00\x01\x00')
+        self.write_attr(0x28, b'\x01\x00')
+        self.write_attr(0x1d, b'\x01\x00')
         self.write_attr(0x19, b'\x01\x03\x01\x01\x00')
+
+    def mc_end_collection(self):
+        '''Myo Connect sends this sequence (or a reordering) when ending data collection
+        for v1.0 firmware; this reenables arm and pose notifications, but
+        doesn't disable raw data.
+        '''
+
+        self.write_attr(0x28, b'\x01\x00')
+        self.write_attr(0x1d, b'\x01\x00')
+        self.write_attr(0x24, b'\x02\x00')
+        self.write_attr(0x19, b'\x01\x03\x01\x01\x01')
+        self.write_attr(0x19, b'\x09\x01\x00\x00\x00')
+        self.write_attr(0x1d, b'\x01\x00')
+        self.write_attr(0x24, b'\x02\x00')
+        self.write_attr(0x19, b'\x01\x03\x00\x01\x01')
+        self.write_attr(0x28, b'\x01\x00')
+        self.write_attr(0x1d, b'\x01\x00')
+        self.write_attr(0x24, b'\x02\x00')
         self.write_attr(0x19, b'\x01\x03\x01\x01\x01')
 
     def vibrate(self, length):
