@@ -297,13 +297,36 @@ class MyoRaw(object):
                 gyro = vals[7:10]
                 self.on_imu(quat, acc, gyro)
             elif attr == 0x23:
-                typ, val, xdir, _,_,_ = unpack('6B', pay)
+                if len(pay) == 6:
+                    try:
+                        typ, val, xdir, _,_,_ = unpack('6B', pay)
+                    except Exception as e:
+                        print("Got exception: " + str(e) + "\nContinuing...")
+                        return
+                elif len(pay) == 3:
+                    try:
+                        typ, val, xdir = unpack('3B', pay)
+                        val = str(val)
+                        xdir = str(xdir)
+                        print("Got gesture... typ, val" + str(typ) + " " + str(val))
+                        print("type typ, val: " +  str(type(typ)) + " " + str(type(val)))
+                    except Exception as e:
+                        print("Got exception: " + str(e) + "\nContinuing...")
+                        return
 
                 if typ == 1: # on arm
+                    print("On arm...")
+                    print("val: " + str(val))
+                    print("xdir: " + str(xdir))
+                    arm_thing = Arm(val)
+                    print("arm_thing: " + str(type(arm_thing)) + " " + str(arm_thing))
+                    #import pdb; pdb.set_trace()
                     self.on_arm(Arm(val), XDirection(xdir))
                 elif typ == 2: # removed from arm
-                    self.on_arm(Arm.UNKNOWN, XDirection.UNKNOWN)
+                    print("On arm... type 2 bullshit")
+                    self.on_arm(Arm('0'), XDirection('0'))
                 elif typ == 3: # pose
+                    print("Its a pose!!")
                     self.on_pose(Pose(val))
             else:
                 print('data with unknown attr: %02X %s' % (attr, p))
@@ -423,7 +446,7 @@ if __name__ == '__main__':
     # Define Publishers
     imuPub = rospy.Publisher('myo_imu', Imu, queue_size=10)
     emgPub = rospy.Publisher('myo_emg', EmgArray, queue_size=10)
-    armPub = rospy.Publisher('myo_arm', MyoArm, queue_size=10)
+    armPub = rospy.Publisher('myo_arm', MyoArm, queue_size=10, latch=True)
     gestPub = rospy.Publisher('myo_gest', UInt8, queue_size=10)
 
     rospy.init_node('myo_raw', anonymous=True)
@@ -445,6 +468,9 @@ if __name__ == '__main__':
         # define MYOHW_ORIENTATION_SCALE   16384.0f ///< See myohw_imu_data_t::orientation
         # define MYOHW_ACCELEROMETER_SCALE 2048.0f  ///< See myohw_imu_data_t::accelerometer
         # define MYOHW_GYROSCOPE_SCALE     16.0f    ///< See myohw_imu_data_t::gyroscope
+        if not any(quat1):
+            # If it's all 0's means we got no data, don't do anything
+            return
         h = Header()
         h.stamp = rospy.Time.now()
         h.frame_id = 'myo'
@@ -459,15 +485,17 @@ if __name__ == '__main__':
         imu = Imu(h, normQuat, cov, normGyro, cov, normAcc, cov)
         imuPub.publish(imu)
 
-    # Package the arm and x-axis direction into an Arm message	
+    # Package the arm and x-axis direction into an Arm message  
     def proc_arm(arm, xdir):
         #When the arm state changes, publish the new arm and orientation
-        calibArm=MyoArm(arm.value, xdir.value)
+        #calibArm=MyoArm(arm.value, xdir.value)
+        calibArm=MyoArm(int(arm._keys[0]), int(xdir._keys[0]))
         armPub.publish(calibArm)
 
     # Publish the value of an enumerated gesture
     def proc_pose(p):
-        gestPub.publish(p.value)
+        #gestPub.publish(p.value)
+        gestPub.publish(int(p._keys[0]))
 
     m.add_emg_handler(proc_emg)
     m.add_imu_handler(proc_imu)
@@ -475,14 +503,17 @@ if __name__ == '__main__':
     m.add_pose_handler(proc_pose)
 
     m.connect()
+    m.mc_end_collection()
 
     try:
 
         while not rospy.is_shutdown():
             m.run(1)
+            #print("Run...")
 
     except (rospy.ROSInterruptException, serial.serialutil.SerialException) as e:
-        pass
+        print("Exception: " + str(e))
+        #pass
     finally:
         print()
         print("Disconnecting...")
