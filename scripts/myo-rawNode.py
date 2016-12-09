@@ -2,165 +2,19 @@
 
 from __future__ import print_function
 
-import enum
 import re
 import sys
-import threading
-import time
-import math
+from math import sqrt, degrees
 import serial
 from serial.tools.list_ports import comports
-from common import *
+from common import pack, unpack, multiord
+from bluetooth import BT
 import rospy
-from std_msgs.msg import String, UInt8, Header
+from tf.transformations import euler_from_quaternion
+from std_msgs.msg import String, Header
 from geometry_msgs.msg import Quaternion, Vector3
 from sensor_msgs.msg import Imu
 from ros_myo.msg import MyoArm, MyoPose, EmgArray
-
-
-def multichr(ords):
-    if sys.version_info[0] >= 3:
-        return bytes(ords)
-    else:
-        return ''.join(map(chr, ords))
-
-
-def multiord(b):
-    if sys.version_info[0] >= 3:
-        return list(b)
-    else:
-        return map(ord, b)
-
-
-class Packet(object):
-    def __init__(self, ords):
-        self.typ = ords[0]
-        self.cls = ords[2]
-        self.cmd = ords[3]
-        self.payload = multichr(ords[4:])
-
-    def __repr__(self):
-        return 'Packet(%02X, %02X, %02X, [%s])' % \
-            (self.typ, self.cls, self.cmd,
-             ' '.join('%02X' % b for b in multiord(self.payload)))
-
-
-class BT(object):
-    '''Implements the non-Myo-specific details of the Bluetooth protocol.'''
-    def __init__(self, tty):
-        self.ser = serial.Serial(port=tty, baudrate=9600, dsrdtr=1)
-        self.buf = []
-        self.lock = threading.Lock()
-        self.handlers = []
-
-    # internal data-handling methods
-    def recv_packet(self, timeout=None):
-        t0 = time.time()
-        self.ser.timeout = None
-        while timeout is None or time.time() < t0 + timeout:
-            if timeout is not None: self.ser.timeout = t0 + timeout - time.time()
-            c = self.ser.read()
-            if not c:
-                return None
-
-            ret = self.proc_byte(ord(c))
-            if ret:
-                if ret.typ == 0x80:
-                    self.handle_event(ret)
-                return ret
-
-    def recv_packets(self, timeout=.5):
-        res = []
-        t0 = time.time()
-        while time.time() < t0 + timeout:
-            p = self.recv_packet(t0 + timeout - time.time())
-            if not p:
-                return res
-            res.append(p)
-        return res
-
-    def proc_byte(self, c):
-        if not self.buf:
-            if c in [0x00, 0x80, 0x08, 0x88]:
-                self.buf.append(c)
-            return None
-        elif len(self.buf) == 1:
-            self.buf.append(c)
-            self.packet_len = 4 + (self.buf[0] & 0x07) + self.buf[1]
-            return None
-        else:
-            self.buf.append(c)
-
-        if self.packet_len and len(self.buf) == self.packet_len:
-            p = Packet(self.buf)
-            self.buf = []
-            return p
-        return None
-
-    def handle_event(self, p):
-        for h in self.handlers:
-            h(p)
-
-    def add_handler(self, h):
-        self.handlers.append(h)
-
-    def remove_handler(self, h):
-        try:
-            self.handlers.remove(h)
-        except ValueError:
-            pass
-
-    def wait_event(self, cls, cmd):
-        res = [None]
-
-        def h(p):
-            if p.cls == cls and p.cmd == cmd:
-                res[0] = p
-
-        self.add_handler(h)
-        while res[0] is None:
-            self.recv_packet()
-        self.remove_handler(h)
-        return res[0]
-
-    # specific BLE commands
-    def connect(self, addr):
-        return self.send_command(6, 3, pack('6sBHHHH', multichr(addr),
-                                 0, 6, 6, 64, 0))
-
-    def get_connections(self):
-        return self.send_command(0, 6)
-
-    def discover(self):
-        return self.send_command(6, 2, b'\x01')
-
-    def end_scan(self):
-        return self.send_command(6, 4)
-
-    def disconnect(self, h):
-        return self.send_command(3, 0, pack('B', h))
-
-    def read_attr(self, con, attr):
-        self.send_command(4, 4, pack('BH', con, attr))
-        return self.wait_event(4, 5)
-
-    def write_attr(self, con, attr, val):
-        self.send_command(4, 5, pack('BHB', con, attr, len(val)) + val)
-        return self.wait_event(4, 1)
-
-    def send_command(self, cls, cmd, payload=b'', wait_resp=True):
-        s = pack('4B', 0, len(payload), cls, cmd) + payload
-        self.ser.write(s)
-
-        while True:
-            p = self.recv_packet()
-
-            # no timeout, so p won't be None
-            if p.typ == 0:
-                return p
-
-            # not a response: must be an event
-            self.handle_event(p)
 
 
 class MyoRaw(object):
@@ -304,7 +158,11 @@ class MyoRaw(object):
                 elif typ == 2:  # removed from arm
                     self.on_arm(MyoArm(MyoArm.UNKNOWN, MyoArm.UNKNOWN))
                 elif typ == 3:  # pose
-                    self.on_pose(MyoPose(val+1))
+                    if val == 255:
+                        pose = MyoPose(0)
+                    else:
+                        pose = MyoPose(val + 1)
+                    self.on_pose(pose)
             else:
                 print('data with unknown attr: %02X %s' % (attr, p))
 
@@ -418,11 +276,13 @@ if __name__ == '__main__':
     rospy.init_node('myo_raw')
 
     # Define Publishers
-    imuPub = rospy.Publisher('myo_imu', Imu, queue_size=1)
-    emgPub = rospy.Publisher('myo_emg', EmgArray, queue_size=1)
-    armPub = rospy.Publisher('myo_arm', MyoArm, queue_size=1, latch=True)
-    gestPub = rospy.Publisher('myo_gest', UInt8, queue_size=1)
-    gestStrPub = rospy.Publisher('myo_gest_str', String, queue_size=1)
+    imuPub = rospy.Publisher('~myo_imu', Imu, queue_size=1)
+    oriPub = rospy.Publisher('~myo_ori', Vector3, queue_size=1)
+    oriDegPub = rospy.Publisher('~myo_ori_deg', Vector3, queue_size=1)
+    emgPub = rospy.Publisher('~myo_emg', EmgArray, queue_size=1)
+    armPub = rospy.Publisher('~myo_arm', MyoArm, queue_size=1, latch=True)
+    gestPub = rospy.Publisher('~myo_gest', MyoPose, queue_size=1)
+    gestStrPub = rospy.Publisher('~myo_gest_str', String, queue_size=1)
 
     # Package the EMG data into an EmgArray
     def proc_emg(emg, moving):
@@ -446,7 +306,8 @@ if __name__ == '__main__':
             return
         h = Header()
         h.stamp = rospy.Time.now()
-        h.frame_id = 'myo'
+        # frame_id is node name without /
+        h.frame_id = rospy.get_name()[1:]
         # We currently don't know the covariance of the sensors with each other
         cov = [0, 0, 0, 0, 0, 0, 0, 0, 0]
         quat = Quaternion(quat1[0] / 16384.0,
@@ -454,7 +315,8 @@ if __name__ == '__main__':
                           quat1[2] / 16384.0,
                           quat1[3] / 16384.0)
         # Normalize the quaternion and accelerometer values
-        quatNorm = math.sqrt(quat.x*quat.x + quat.y*quat.y + quat.z*quat.z + quat.w*quat.w)
+        quatNorm = sqrt(quat.x * quat.x + quat.y *
+                        quat.y + quat.z * quat.z + quat.w * quat.w)
         normQuat = Quaternion(quat.x / quatNorm,
                               quat.y / quatNorm,
                               quat.z / quatNorm,
@@ -465,6 +327,12 @@ if __name__ == '__main__':
         normGyro = Vector3(gyro[0] / 16.0, gyro[1] / 16.0, gyro[2] / 16.0)
         imu = Imu(h, normQuat, cov, normGyro, cov, normAcc, cov)
         imuPub.publish(imu)
+        roll, pitch, yaw = euler_from_quaternion([normQuat.x,
+                                                  normQuat.y,
+                                                  normQuat.z,
+                                                  normQuat.w])
+        oriPub.publish(Vector3(roll, pitch, yaw))
+        oriDegPub.publish(Vector3(degrees(roll), degrees(pitch), degrees(yaw)))
 
     # Package the arm and x-axis direction into an Arm message
     def proc_arm(myoarm_msg):
@@ -475,8 +343,24 @@ if __name__ == '__main__':
     # Publish the value of an enumerated gesture
     def proc_pose(myo_pose):
         gestPub.publish(myo_pose)
-        # myo_pose.
-        # gestStrPub.publish()
+        p = myo_pose.pose
+        if p == 0:
+            s = "UNKNOWN"
+        elif p == 1:
+            s = "REST"
+        elif p == 2:
+            s = "FIST"
+        elif p == 3:
+            s = "WAVE_IN"
+        elif p == 4:
+            s = "WAVE_OUT"
+        elif p == 5:
+            s = "FINGERS_SPREAD"
+        elif p == 6:
+            s = "THUMB_TO_PINKY"
+        else:
+            s = "ERROR"
+        gestStrPub.publish(s)
 
     m.add_emg_handler(proc_emg)
     m.add_imu_handler(proc_imu)
