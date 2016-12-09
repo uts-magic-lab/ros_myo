@@ -1,0 +1,5 @@
+<launch>
+
+  <node pkg="ros_myo" name="myo_raw" type="myo-rawNode.py"/>
+
+</launch>
