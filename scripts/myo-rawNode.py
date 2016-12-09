@@ -377,7 +377,7 @@ if __name__ == '__main__':
 
     def vibrate_cb(data):
         if data.data in range(1, 4):
-            print("Vibrating with intensity: " + str(data))
+            print("Vibrating with intensity (1, 2, 3): " + str(data.data))
             global vibrate_order
             vibrate_order = data.data
 
