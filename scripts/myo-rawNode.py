@@ -11,7 +11,7 @@ from common import pack, unpack, multiord
 from bluetooth import BT
 import rospy
 from tf.transformations import euler_from_quaternion
-from std_msgs.msg import String, Header
+from std_msgs.msg import String, Header, UInt8
 from geometry_msgs.msg import Quaternion, Vector3
 from sensor_msgs.msg import Imu
 from ros_myo.msg import MyoArm, MyoPose, EmgArray
@@ -259,6 +259,9 @@ class MyoRaw(object):
             h(myoarm_msg)
 
 
+global vibrate_order
+vibrate_order = 0
+
 if __name__ == '__main__':
     # Start by initializing the Myo and attempting to connect.
     # If no Myo is found, we attempt to reconnect every 0.5 seconds
@@ -368,12 +371,25 @@ if __name__ == '__main__':
     m.add_pose_handler(proc_pose)
 
     m.connect()
-    m.mc_end_collection()
+
+    global vibrate_order
+    vibrate_order = 0
+
+    def vibrate_cb(data):
+        if data.data in range(1, 4):
+            print("Vibrating with intensity: " + str(data))
+            global vibrate_order
+            vibrate_order = data.data
+
+    # Add a way to make the controller vibrate
+    vibrateSub = rospy.Subscriber('~vibrate', UInt8, vibrate_cb, queue_size=1)
 
     try:
-
         while not rospy.is_shutdown():
             m.run(1)
+            if vibrate_order in range(1, 4):
+                m.vibrate(vibrate_order)
+                vibrate_order = 0
 
     except (rospy.ROSInterruptException, serial.serialutil.SerialException) as e:
         print("Exception: " + str(e))
