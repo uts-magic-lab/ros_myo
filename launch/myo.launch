@@ -1,5 +1,7 @@
+<?xml version="1.0"?>
 <launch>
+  <arg name="port" default="/dev/ttyACM0" doc="Port used by the Myo dongle. Check it with 'ls /dev/' and look for ttyACM0 for instance. You need to provide the full path." />
 
-  <node pkg="ros_myo" name="myo_raw" type="myo-rawNode.py"/>
+  <node pkg="ros_myo" name="myo_raw" type="myo-rawNode.py" args="$(arg port)" output="screen"/>
 
 </launch>
