@@ -1,5 +1,21 @@
+<?xml version="1.0"?>
 <launch>
 
-  <node pkg="ros_myo" name="myo_raw" type="myo-rawNode.py"/>
+  <!-- user args -->
+  <arg name="port" default="/dev/ttyACM0" doc="Port used by the Myo dongle. Check it with 'ls /dev/' and look for ttyACM0 for instance. You need to provide the full path." />
+  <arg name="rviz" default="true" doc="rviz visualization or not"/>
+
+  <!-- myo ros node -->
+  <node pkg="ros_myo" name="myo_raw" type="myo-rawNode.py" args="$(arg port)" output="screen"/>
+
+  <!--visualization-->
+  <group if="$(arg rviz)">
+      <node
+          name="rviz"
+          pkg="rviz"
+          type="rviz"
+          args="-d $(find ros_myo)/rviz/orientation.rviz">
+      </node>
+  </group>
 
 </launch>

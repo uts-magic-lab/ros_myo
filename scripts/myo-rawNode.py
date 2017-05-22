@@ -12,7 +12,7 @@ from bluetooth import BT
 import rospy
 from tf.transformations import euler_from_quaternion
 from std_msgs.msg import String, Header, UInt8
-from geometry_msgs.msg import Quaternion, Vector3
+from geometry_msgs.msg import Quaternion, Vector3, PoseStamped, Point, Pose
 from sensor_msgs.msg import Imu
 from ros_myo.msg import MyoArm, MyoPose, EmgArray
 
@@ -286,6 +286,7 @@ if __name__ == '__main__':
     armPub = rospy.Publisher('~myo_arm', MyoArm, queue_size=1, latch=True)
     gestPub = rospy.Publisher('~myo_gest', MyoPose, queue_size=1)
     gestStrPub = rospy.Publisher('~myo_gest_str', String, queue_size=1)
+    posePub = rospy.Publisher('~pose', PoseStamped, queue_size=1)
 
     # Package the EMG data into an EmgArray
     def proc_emg(emg, moving):
@@ -336,6 +337,7 @@ if __name__ == '__main__':
                                                   normQuat.w])
         oriPub.publish(Vector3(roll, pitch, yaw))
         oriDegPub.publish(Vector3(degrees(roll), degrees(pitch), degrees(yaw)))
+        posePub.publish( PoseStamped(h,Pose(Point(0.0,0.0,0.0),normQuat)) )
 
     # Package the arm and x-axis direction into an Arm message
     def proc_arm(myoarm_msg):
